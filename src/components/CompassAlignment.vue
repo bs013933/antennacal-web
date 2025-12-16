@@ -19,8 +19,11 @@
     </div>
 
     <div v-else class="compass-display">
-      <!-- 罗盘背景 -->
-      <div class="compass-circle">
+      <!-- 罗盘背景（随设备方向反向旋转，使方向标记始终指向真实方向） -->
+      <div 
+        class="compass-circle"
+        :style="{ transform: `rotate(${-smoothedHeading}deg)` }"
+      >
         <!-- 方向标记 -->
         <div class="direction-markers">
           <div class="marker north">N</div>
@@ -36,44 +39,43 @@
         >
           <div class="target-marker">{{ t.target }}</div>
         </div>
-
-        <!-- 当前设备方向箭头 -->
-        <div 
-          class="device-arrow" 
-          :class="{ 'aligned': isAligned }"
-          :style="{ transform: `rotate(${currentHeading}deg)` }"
-        >
-          <svg width="80" height="80" viewBox="0 0 80 80">
-            <defs>
-              <linearGradient id="arrowGradientRed" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" style="stop-color:#ff4444;stop-opacity:1" />
-                <stop offset="100%" style="stop-color:#cc0000;stop-opacity:1" />
-              </linearGradient>
-              <linearGradient id="arrowGradientGreen" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" style="stop-color:#44ff44;stop-opacity:1" />
-                <stop offset="100%" style="stop-color:#00cc00;stop-opacity:1" />
-              </linearGradient>
-            </defs>
-            <g transform="rotate(0 40 40)">
-              <path 
-                d="M 40 10 L 30 35 L 35 35 L 35 60 L 45 60 L 45 35 L 50 35 Z" 
-                :fill="isAligned ? 'url(#arrowGradientGreen)' : 'url(#arrowGradientRed)'"
-                stroke="white" 
-                stroke-width="2"
-              />
-            </g>
-          </svg>
-        </div>
-
-        <!-- 中心点 -->
-        <div class="center-dot"></div>
       </div>
+
+      <!-- 当前设备方向箭头（固定在中心，始终指向上方） -->
+      <div 
+        class="device-arrow-fixed" 
+        :class="{ 'aligned': isStableAligned }"
+      >
+        <svg width="80" height="80" viewBox="0 0 80 80">
+          <defs>
+            <linearGradient id="arrowGradientRed" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" style="stop-color:#ff4444;stop-opacity:1" />
+              <stop offset="100%" style="stop-color:#cc0000;stop-opacity:1" />
+            </linearGradient>
+            <linearGradient id="arrowGradientGreen" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" style="stop-color:#44ff44;stop-opacity:1" />
+              <stop offset="100%" style="stop-color:#00cc00;stop-opacity:1" />
+            </linearGradient>
+          </defs>
+          <g transform="rotate(0 40 40)">
+            <path 
+              d="M 40 10 L 30 35 L 35 35 L 35 60 L 45 60 L 45 35 L 50 35 Z" 
+              :fill="isStableAligned ? 'url(#arrowGradientGreen)' : 'url(#arrowGradientRed)'"
+              stroke="white" 
+              stroke-width="2"
+            />
+          </g>
+        </svg>
+      </div>
+
+      <!-- 中心点 -->
+      <div class="center-dot"></div>
 
       <!-- 信息显示 -->
       <div class="info-panel">
         <div class="info-row">
           <span class="info-label">{{ t.currentHeading }}:</span>
-          <span class="info-value">{{ Math.round(currentHeading) }}°</span>
+          <span class="info-value">{{ Math.round(smoothedHeading) }}°</span>
         </div>
         <div class="info-row">
           <span class="info-label">{{ t.targetAzimuth }}:</span>
@@ -81,11 +83,11 @@
         </div>
         <div class="info-row">
           <span class="info-label">{{ t.difference }}:</span>
-          <span class="info-value" :class="{ 'aligned-text': isAligned }">
+          <span class="info-value" :class="{ 'aligned-text': isStableAligned }">
             {{ Math.round(Math.abs(angleDifference)) }}°
           </span>
         </div>
-        <div v-if="isAligned" class="aligned-indicator">
+        <div v-if="isStableAligned" class="aligned-indicator">
           ✓ {{ t.aligned }}
         </div>
       </div>
@@ -94,7 +96,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 
 const props = defineProps({
   targetAzimuth: {
@@ -142,33 +144,109 @@ const isSupported = ref(true);
 const hasPermission = ref(true);
 const needsPermission = ref(false);
 const currentHeading = ref(0);
+const smoothedHeading = ref(0);
+
+// 平滑处理相关
+const headingHistory = ref([]);
+const SMOOTHING_WINDOW = 5; // 使用最近5个读数进行平滑
+
+// 稳定性检测
+const alignedHistory = ref([]);
+const STABILITY_CHECKS = 3; // 需要连续3次对准才确认
+
+// 平滑处理函数
+const smoothHeading = (newHeading) => {
+  headingHistory.value.push(newHeading);
+  
+  // 只保留最近的 N 个读数
+  if (headingHistory.value.length > SMOOTHING_WINDOW) {
+    headingHistory.value.shift();
+  }
+  
+  // 处理角度循环问题（例如：355度和5度的平均）
+  if (headingHistory.value.length < 2) {
+    return newHeading;
+  }
+  
+  // 转换为向量进行平均，避免角度循环问题
+  let sinSum = 0;
+  let cosSum = 0;
+  
+  headingHistory.value.forEach(angle => {
+    const rad = angle * Math.PI / 180;
+    sinSum += Math.sin(rad);
+    cosSum += Math.cos(rad);
+  });
+  
+  const avgRad = Math.atan2(sinSum / headingHistory.value.length, cosSum / headingHistory.value.length);
+  let avgAngle = avgRad * 180 / Math.PI;
+  
+  // 确保结果在 0-360 范围内
+  if (avgAngle < 0) avgAngle += 360;
+  
+  return avgAngle;
+};
 
 // 计算角度差（考虑360度循环）
 const angleDifference = computed(() => {
-  let diff = props.targetAzimuth - currentHeading.value;
+  let diff = props.targetAzimuth - smoothedHeading.value;
   // 标准化到 -180 到 180 范围
   while (diff > 180) diff -= 360;
   while (diff < -180) diff += 360;
   return diff;
 });
 
-// 判断是否对准（误差在±5度内）
+// 当前是否在对准范围内
 const isAligned = computed(() => {
   return Math.abs(angleDifference.value) <= 5;
 });
 
+// 稳定对准状态（需要连续多次确认）
+const isStableAligned = computed(() => {
+  alignedHistory.value.push(isAligned.value);
+  
+  // 只保留最近的检查记录
+  if (alignedHistory.value.length > STABILITY_CHECKS) {
+    alignedHistory.value.shift();
+  }
+  
+  // 所有记录都为true才返回true
+  return alignedHistory.value.length === STABILITY_CHECKS && 
+         alignedHistory.value.every(v => v === true);
+});
+
 let orientationHandler = null;
+let lastUpdateTime = 0;
+const UPDATE_INTERVAL = 50; // 限制更新频率为50ms
 
 const handleOrientation = (event) => {
-  if (event.webkitCompassHeading) {
-    // iOS
-    currentHeading.value = event.webkitCompassHeading;
-  } else if (event.alpha !== null) {
-    // Android 和其他设备
-    // alpha 是设备绕 Z 轴的旋转角度（0-360）
-    // 需要转换为罗盘方向（北为0）
-    currentHeading.value = 360 - event.alpha;
+  const now = Date.now();
+  
+  // 限制更新频率
+  if (now - lastUpdateTime < UPDATE_INTERVAL) {
+    return;
   }
+  lastUpdateTime = now;
+  
+  let heading = 0;
+  
+  if (event.webkitCompassHeading !== undefined) {
+    // iOS - 直接提供罗盘方向
+    heading = event.webkitCompassHeading;
+  } else if (event.absolute && event.alpha !== null) {
+    // Android 绝对方向
+    heading = 360 - event.alpha;
+  } else if (event.alpha !== null) {
+    // 相对方向
+    heading = 360 - event.alpha;
+  }
+  
+  // 标准化到 0-360
+  heading = heading % 360;
+  if (heading < 0) heading += 360;
+  
+  currentHeading.value = heading;
+  smoothedHeading.value = smoothHeading(heading);
 };
 
 const requestPermission = async () => {
@@ -201,23 +279,29 @@ const startCompass = async () => {
     return;
   }
 
+  // 重置历史数据
+  headingHistory.value = [];
+  alignedHistory.value = [];
+
   // 启动监听
   orientationHandler = handleOrientation;
-  window.addEventListener('deviceorientation', orientationHandler);
   
-  // 同时监听 deviceorientationabsolute 事件（某些Android设备）
-  window.addEventListener('deviceorientationabsolute', orientationHandler);
+  // 优先使用 deviceorientationabsolute（提供绝对方向）
+  window.addEventListener('deviceorientationabsolute', orientationHandler, true);
+  window.addEventListener('deviceorientation', orientationHandler, true);
   
   isActive.value = true;
 };
 
 const stopCompass = () => {
   if (orientationHandler) {
-    window.removeEventListener('deviceorientation', orientationHandler);
-    window.removeEventListener('deviceorientationabsolute', orientationHandler);
+    window.removeEventListener('deviceorientationabsolute', orientationHandler, true);
+    window.removeEventListener('deviceorientation', orientationHandler, true);
     orientationHandler = null;
   }
   isActive.value = false;
+  headingHistory.value = [];
+  alignedHistory.value = [];
 };
 
 onMounted(() => {
@@ -229,11 +313,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopCompass();
-});
-
-// 监听目标方位角变化
-watch(() => props.targetAzimuth, () => {
-  // 可以在这里添加提示或动画
 });
 </script>
 
@@ -302,6 +381,7 @@ watch(() => props.targetAzimuth, () => {
   flex-direction: column;
   align-items: center;
   gap: 20px;
+  position: relative;
 }
 
 .compass-circle {
@@ -314,6 +394,8 @@ watch(() => props.targetAzimuth, () => {
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: transform 0.1s ease-out;
+  transform-origin: center center;
 }
 
 .direction-markers {
@@ -381,29 +463,30 @@ watch(() => props.targetAzimuth, () => {
   white-space: nowrap;
 }
 
-.device-arrow {
+/* 固定在中心的箭头，始终指向上方 */
+.device-arrow-fixed {
   position: absolute;
   width: 80px;
   height: 80px;
-  top: 50%;
+  top: 140px; /* 居中对齐罗盘 */
   left: 50%;
   margin-left: -40px;
   margin-top: -40px;
-  transform-origin: 50% 50%;
-  transition: transform 0.1s ease-out;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+  z-index: 10;
+  pointer-events: none;
 }
 
-.device-arrow.aligned {
+.device-arrow-fixed.aligned {
   animation: pulse 1s ease-in-out infinite;
 }
 
 @keyframes pulse {
   0%, 100% {
-    transform: scale(1) rotate(var(--rotation, 0deg));
+    transform: scale(1);
   }
   50% {
-    transform: scale(1.1) rotate(var(--rotation, 0deg));
+    transform: scale(1.15);
   }
 }
 
@@ -415,6 +498,11 @@ watch(() => props.targetAzimuth, () => {
   border-radius: 50%;
   border: 2px solid white;
   box-shadow: 0 0 8px rgba(0, 0, 0, 0.3);
+  top: 140px;
+  left: 50%;
+  margin-left: -6px;
+  margin-top: -6px;
+  z-index: 11;
 }
 
 .info-panel {
