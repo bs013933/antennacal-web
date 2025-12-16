@@ -1,5 +1,6 @@
 <template>
-  <div class="container" :class="{ 'dark-theme': isDarkTheme }">
+  <div class="app-wrapper" :class="{ 'dark-theme': isDarkTheme }">
+    <div class="container">
     <header class="header">
       <h1 class="title">卫星天线参数计算器</h1>
       <button @click="toggleTheme" class="theme-toggle" :title="isDarkTheme ? '切换到亮主题' : '切换到暗主题'">
@@ -76,6 +77,7 @@
           :azimuth="azimuthValue"
         />
       </div>
+    </div>
     </div>
   </div>
 </template>
@@ -156,14 +158,20 @@ const handleCalculate = () => {
 </script>
 
 <style scoped>
+/* 全屏背景容器 */
+.app-wrapper {
+  min-height: 100vh;
+  background-color: #ffffff;
+  color: #333;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  padding: 20px 0;
+}
+
 .container {
   font-family: sans-serif;
   max-width: 600px;
   margin: 0 auto;
-  padding: 20px;
-  background-color: #ffffff;
-  color: #333;
-  transition: background-color 0.3s ease, color 0.3s ease;
+  padding: 0 20px;
 }
 
 .header {
@@ -320,7 +328,7 @@ const handleCalculate = () => {
 }
 
 /* ========== 暗主题样式 ========== */
-.container.dark-theme {
+.app-wrapper.dark-theme {
   background-color: #1a1a1a;
   color: #e0e0e0;
 }
@@ -414,5 +422,13 @@ const handleCalculate = () => {
 
 .dark-theme .map-wrapper {
   border-color: #555;
+}
+</style>
+
+<style>
+/* 确保应用容器占满整个视口 */
+#app {
+  margin: 0;
+  padding: 0;
 }
 </style>
