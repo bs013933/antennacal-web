@@ -86,8 +86,15 @@ const initMap = () => {
 
   map = L.map('map').setView([lat, lng], 13);
 
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors'
+  // 使用高德地图瓦片服务（中国大陆可用）
+  // 根据语言选择中文或英文标注
+  const layerType = props.language === 'zh' ? 'Normal.Map' : 'en_r'; // 中文标注 / English
+  
+  L.tileLayer(`https://webrd0{s}.is.autonavi.com/appmaptile?lang=${props.language === 'zh' ? 'zh_cn' : 'en'}&size=1&scale=1&style=8&x={x}&y={y}&z={z}`, {
+    subdomains: ['1', '2', '3', '4'],
+    attribution: '&copy; <a href="https://www.amap.com/" target="_blank">高德地图</a>',
+    maxZoom: 18,
+    minZoom: 3
   }).addTo(map);
 
   updateMarker();
@@ -142,14 +149,8 @@ watch(() => [props.latitude, props.longitude, props.azimuth], () => {
 });
 
 watch(() => props.language, () => {
-  // 更新提示文本
-  if (marker) {
-    const tooltipText = props.language === 'zh' 
-      ? `方位角: ${Math.round(props.azimuth)}°` 
-      : `Azimuth: ${Math.round(props.azimuth)}°`;
-    marker.setTooltipContent(tooltipText);
-    marker.options.title = props.language === 'zh' ? '天线指向' : 'Antenna Direction';
-  }
+  // 语言切换时重新初始化地图，以更新地图标注语言
+  initMap();
 });
 
 </script>
