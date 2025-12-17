@@ -47,7 +47,7 @@
         <!-- 设备方向指针（红色箭头，会旋转） -->
         <div class="device-needle" 
           :class="{ 'aligned': isStableAligned }"
-          :style="{ transform: `rotate(${smoothedHeading}deg)` }">
+          :style="{ transform: `rotate(${accumulatedRotation}deg)` }">
           <div class="needle-head"></div>
           <div class="needle-tail"></div>
         </div>
@@ -173,6 +173,10 @@ const calibrationOffset = ref(0);
 const isAndroid = /android/i.test(navigator.userAgent);
 const isXiaomi = /xiaomi|mi\s|redmi/i.test(navigator.userAgent);
 
+// 累积旋转角度（解决360度边界反向问题）
+const accumulatedRotation = ref(0); // 累积的旋转角度，可以超过360度
+const lastHeading = ref(null); // 上一次的heading值
+
 // 平滑处理 - 增加平滑窗口以减少抖动
 const headingHistory = ref([]);
 const SMOOTHING_WINDOW = 8; // 从3增加到8，提供更好的平滑效果
@@ -227,6 +231,32 @@ const smoothHeading = (newHeading) => {
   if (avgAngle < 0) avgAngle += 360;
   
   return avgAngle;
+};
+
+// 更新累积旋转角度（解决360度边界反向旋转问题）
+const updateAccumulatedRotation = (newHeading) => {
+  if (lastHeading.value === null) {
+    // 首次设置
+    lastHeading.value = newHeading;
+    accumulatedRotation.value = newHeading;
+    return accumulatedRotation.value;
+  }
+  
+  // 计算角度差异
+  let delta = newHeading - lastHeading.value;
+  
+  // 处理360度边界：选择最短路径
+  if (delta > 180) {
+    delta = delta - 360; // 实际是逆时针旋转
+  } else if (delta < -180) {
+    delta = delta + 360; // 实际是顺时针旋转
+  }
+  
+  // 累积旋转角度（不限制在0-360范围内）
+  accumulatedRotation.value += delta;
+  lastHeading.value = newHeading;
+  
+  return accumulatedRotation.value;
 };
 
 // 计算角度差
@@ -300,6 +330,9 @@ const handleOrientation = (event) => {
     
     rawHeading.value = heading;
     smoothedHeading.value = smoothHeading(heading);
+    
+    // 更新累积旋转角度（用于CSS动画，避免360度边界反向）
+    updateAccumulatedRotation(smoothedHeading.value);
   }
 };
 
@@ -336,6 +369,8 @@ const startCompass = async () => {
   alignedHistory.value = [];
   rawHeading.value = 0;
   smoothedHeading.value = 0;
+  accumulatedRotation.value = 0;
+  lastHeading.value = null;
 
   orientationHandler = handleOrientation;
   
