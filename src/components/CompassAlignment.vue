@@ -279,24 +279,24 @@ const handleOrientation = (event) => {
     heading = event.webkitCompassHeading;
     sensorType.value = 'iOS Compass';
   }
-  // Android 绝对方向（优先）- 基于地球坐标系
+  // Android 绝对方向（优先）
   else if (event.absolute && event.alpha !== null) {
     heading = event.alpha;
     sensorType.value = 'Android Absolute' + (isXiaomi ? ' (Xiaomi)' : '');
     
-    // Android设备需要反转：alpha值的定义与罗盘方向相反
-    // 当设备顺时针旋转时，alpha逆时针减小，需要反转
-    if (isAndroid) {
+    // 只对小米设备反转
+    // 小米部分型号的alpha值定义与标准相反
+    if (isXiaomi) {
       heading = 360 - heading;
     }
   }
-  // Android 相对方向 - 基于设备初始方向
+  // Android 相对方向
   else if (event.alpha !== null) {
     heading = event.alpha;
     sensorType.value = 'Android Relative' + (isXiaomi ? ' (Xiaomi)' : '');
     
-    // 相对方向也需要反转
-    if (isAndroid) {
+    // 相对方向下，小米也需要反转
+    if (isXiaomi) {
       heading = 360 - heading;
     }
   }
