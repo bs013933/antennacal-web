@@ -19,28 +19,6 @@
     </div>
 
     <div v-else class="compass-display">
-      <!-- 校准控制面板 -->
-      <div class="calibration-panel">
-        <div class="calibration-title">{{ t.calibration }}</div>
-        <div class="calibration-controls">
-          <button @click="adjustOffset(-1)" class="offset-button">-1°</button>
-          <button @click="adjustOffset(-5)" class="offset-button">-5°</button>
-          <div class="offset-display">
-            <span class="offset-label">{{ t.offset }}:</span>
-            <span class="offset-value">{{ manualOffset > 0 ? '+' : '' }}{{ Math.round(manualOffset) }}°</span>
-          </div>
-          <button @click="adjustOffset(5)" class="offset-button">+5°</button>
-          <button @click="adjustOffset(1)" class="offset-button">+1°</button>
-        </div>
-        <div class="calibration-actions">
-          <button @click="resetCalibration" class="reset-button">{{ t.reset }}</button>
-          <label class="declination-toggle">
-            <input type="checkbox" v-model="useMagneticDeclination">
-            <span>{{ t.magneticDeclination }}</span>
-          </label>
-        </div>
-      </div>
-
       <div class="compass-wrapper">
         <!-- 固定的罗盘圆盘（N始终在上方） -->
         <div class="compass-circle">
@@ -67,9 +45,10 @@
         </div>
 
         <!-- 设备方向指针（红色箭头，会旋转） -->
+        <!-- 使用负角度使指针与设备旋转方向一致 -->
         <div class="device-needle" 
           :class="{ 'aligned': isStableAligned }"
-          :style="{ transform: `rotate(${accumulatedRotation}deg)` }">
+          :style="{ transform: `rotate(-${accumulatedRotation}deg)` }">
           <div class="needle-head"></div>
           <div class="needle-tail"></div>
         </div>
@@ -82,7 +61,7 @@
       <div class="info-panel">
         <div class="info-row">
           <span class="info-label">{{ t.currentHeading }}:</span>
-          <span class="info-value">{{ Math.round(calibratedHeading) }}°</span>
+          <span class="info-value">{{ Math.round(smoothedHeading) }}°</span>
         </div>
         <div class="info-row">
           <span class="info-label">{{ t.targetAzimuth }}:</span>
@@ -95,12 +74,10 @@
           </span>
         </div>
         
-        <!-- 调试信息（可通过双击标题显示） -->
+        <!-- 调试信息（仅开发时显示） -->
         <div v-if="showDebug" class="debug-info">
           <div class="debug-row">Raw: {{ Math.round(rawHeading) }}°</div>
           <div class="debug-row">Smoothed: {{ Math.round(smoothedHeading) }}°</div>
-          <div class="debug-row">Offset: {{ Math.round(manualOffset) }}°</div>
-          <div class="debug-row">Declination: {{ magneticDeclinationValue.toFixed(2) }}°</div>
           <div class="debug-row">Sensor: {{ sensorType }}</div>
           <div class="debug-row">Device: {{ deviceInfo }}</div>
           <div class="debug-row">Screen: {{ screenOrientation }}°</div>
@@ -123,7 +100,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 
 const props = defineProps({
   targetAzimuth: {
@@ -149,11 +126,7 @@ const translations = {
     difference: '偏差',
     aligned: '已对准！',
     turnLeft: '向左转',
-    turnRight: '向右转',
-    calibration: '罗盘校准',
-    offset: '偏移',
-    reset: '重置',
-    magneticDeclination: '磁偏角补偿'
+    turnRight: '向右转'
   },
   en: {
     title: 'Real-time Compass',
@@ -166,11 +139,7 @@ const translations = {
     difference: 'Offset',
     aligned: 'Aligned!',
     turnLeft: 'Turn Left',
-    turnRight: 'Turn Right',
-    calibration: 'Calibration',
-    offset: 'Offset',
-    reset: 'Reset',
-    magneticDeclination: 'Magnetic Declination'
+    turnRight: 'Turn Right'
   }
 };
 
@@ -185,107 +154,7 @@ const smoothedHeading = ref(0);
 const sensorType = ref('');
 const showDebug = ref(false); // 设为 true 可显示调试信息
 
-// ========== 校准相关 ==========
-const CALIBRATION_KEY = 'compass-manual-offset';
-const DECLINATION_KEY = 'compass-use-declination';
-
-// 手动偏移量（从localStorage加载）
-const manualOffset = ref(parseFloat(localStorage.getItem(CALIBRATION_KEY) || '0'));
-
-// 是否使用磁偏角补偿
-const useMagneticDeclination = ref(localStorage.getItem(DECLINATION_KEY) === 'true');
-
-// 用户地理位置
-const userLatitude = ref(null);
-const userLongitude = ref(null);
-
-// 磁偏角值（东偏为正，西偏为负）
-const magneticDeclinationValue = ref(0);
-
-// 调整偏移量
-const adjustOffset = (delta) => {
-  manualOffset.value += delta;
-  // 标准化到 -180 到 180 范围
-  while (manualOffset.value > 180) manualOffset.value -= 360;
-  while (manualOffset.value < -180) manualOffset.value += 360;
-  
-  // 保存到localStorage
-  localStorage.setItem(CALIBRATION_KEY, manualOffset.value.toString());
-};
-
-// 重置校准
-const resetCalibration = () => {
-  manualOffset.value = 0;
-  localStorage.setItem(CALIBRATION_KEY, '0');
-};
-
-// 监听磁偏角开关变化，保存到localStorage
-watch(useMagneticDeclination, (newValue) => {
-  localStorage.setItem(DECLINATION_KEY, newValue.toString());
-  if (newValue && !userLatitude.value) {
-    // 如果启用磁偏角但还没有位置信息，尝试获取
-    getUserLocation();
-  }
-});
-
-// 获取用户位置
-const getUserLocation = () => {
-  if ('geolocation' in navigator) {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        userLatitude.value = position.coords.latitude;
-        userLongitude.value = position.coords.longitude;
-        // 计算磁偏角
-        magneticDeclinationValue.value = getMagneticDeclination(
-          userLatitude.value,
-          userLongitude.value
-        );
-      },
-      (error) => {
-        console.warn('无法获取位置信息:', error.message);
-      }
-    );
-  }
-};
-
-// 简化的磁偏角计算（基于世界磁场模型WMM的近似）
-// 实际应用中应该使用更精确的WMM库或API
-const getMagneticDeclination = (lat, lon) => {
-  // 这是一个简化模型，仅供演示
-  // 对于中国地区，磁偏角大约在 -10° 到 +5° 之间
-  // 更精确的值需要使用 WMM (World Magnetic Model)
-  
-  // 中国区域的简化计算
-  if (lat >= 18 && lat <= 54 && lon >= 73 && lon <= 135) {
-    // 东部地区倾向于西偏（负值），西部地区倾向于东偏（正值）
-    const declinationApprox = (lon - 120) * 0.15 + (lat - 35) * 0.05;
-    return declinationApprox;
-  }
-  
-  // 其他地区返回0（需要实际数据）
-  return 0;
-};
-
-// 计算校准后的朝向
-const calibratedHeading = computed(() => {
-  let heading = smoothedHeading.value;
-  
-  // 应用手动偏移
-  heading += manualOffset.value;
-  
-  // 应用磁偏角补偿
-  if (useMagneticDeclination.value && magneticDeclinationValue.value !== 0) {
-    heading -= magneticDeclinationValue.value; // 磁北 -> 真北
-  }
-  
-  // 标准化到 0-360
-  heading = heading % 360;
-  if (heading < 0) heading += 360;
-  
-  return heading;
-});
-
-// ========== 设备检测（增强版） ==========
+// ========== 设备检测 ==========
 const userAgent = navigator.userAgent.toLowerCase();
 const isAndroid = /android/i.test(userAgent);
 const isIOS = /iphone|ipad|ipod/i.test(userAgent);
@@ -405,9 +274,9 @@ const updateAccumulatedRotation = (newHeading) => {
   return accumulatedRotation.value;
 };
 
-// 计算角度差（使用校准后的朝向）
+// 计算角度差
 const angleDifference = computed(() => {
-  let diff = props.targetAzimuth - calibratedHeading.value;
+  let diff = props.targetAzimuth - smoothedHeading.value;
   while (diff > 180) diff -= 360;
   while (diff < -180) diff += 360;
   return diff;
@@ -435,7 +304,7 @@ const isStableAligned = computed(() => {
 
 let orientationHandler = null;
 
-// 处理设备方向事件（改进版）
+// 处理设备方向事件
 const handleOrientation = (event) => {
   let heading = null;
   
@@ -443,10 +312,6 @@ const handleOrientation = (event) => {
   if (event.webkitCompassHeading !== undefined && event.webkitCompassHeading !== null) {
     heading = event.webkitCompassHeading;
     sensorType.value = 'iOS Compass';
-    
-    // iOS需要考虑屏幕方向
-    const screenAngle = getScreenOrientation();
-    // iOS的webkitCompassHeading已经考虑了屏幕方向，通常不需要额外调整
   }
   // Android 绝对方向（优先）
   else if (event.absolute && event.alpha !== null) {
@@ -486,8 +351,8 @@ const handleOrientation = (event) => {
     rawHeading.value = heading;
     smoothedHeading.value = smoothHeading(heading);
     
-    // 更新累积旋转（使用校准后的值）
-    updateAccumulatedRotation(calibratedHeading.value);
+    // 更新累积旋转
+    updateAccumulatedRotation(smoothedHeading.value);
   }
 };
 
@@ -570,11 +435,6 @@ onMounted(() => {
     isSupported.value = false;
   }
   
-  // 尝试获取位置信息（用于磁偏角计算）
-  if (useMagneticDeclination.value) {
-    getUserLocation();
-  }
-  
   // 获取屏幕方向
   getScreenOrientation();
 });
@@ -651,118 +511,6 @@ onUnmounted(() => {
   gap: 20px;
 }
 
-/* ========== 校准面板样式 ========== */
-.calibration-panel {
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 10px;
-  padding: 15px 20px;
-  width: 300px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
-}
-
-.calibration-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: #666;
-  margin-bottom: 12px;
-  text-align: center;
-}
-
-.calibration-controls {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.offset-button {
-  padding: 6px 12px;
-  background: #667eea;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  min-width: 45px;
-}
-
-.offset-button:hover {
-  background: #5568d3;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
-}
-
-.offset-button:active {
-  transform: translateY(0);
-}
-
-.offset-display {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-}
-
-.offset-label {
-  font-size: 11px;
-  color: #999;
-}
-
-.offset-value {
-  font-size: 16px;
-  font-weight: 700;
-  color: #667eea;
-}
-
-.calibration-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding-top: 10px;
-  border-top: 1px solid #eee;
-}
-
-.reset-button {
-  padding: 6px 12px;
-  background: #ff9800;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.reset-button:hover {
-  background: #f57c00;
-  transform: scale(1.05);
-}
-
-.declination-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  color: #666;
-}
-
-.declination-toggle input[type="checkbox"] {
-  cursor: pointer;
-  width: 16px;
-  height: 16px;
-}
-
-.declination-toggle span {
-  user-select: none;
-}
-
-/* ========== 罗盘样式 ========== */
 .compass-wrapper {
   position: relative;
   width: 300px;
