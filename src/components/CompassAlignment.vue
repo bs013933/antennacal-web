@@ -78,6 +78,7 @@
         <div v-if="showDebug" class="debug-info">
           <div class="debug-row">Raw: {{ Math.round(rawHeading) }}°</div>
           <div class="debug-row">Smoothed: {{ Math.round(smoothedHeading) }}°</div>
+          <div class="debug-row">Accumulated: {{ Math.round(accumulatedRotation) }}°</div>
           <div class="debug-row">Sensor: {{ sensorType }}</div>
           <div class="debug-row">Device: {{ deviceInfo }}</div>
           <div class="debug-row">Screen: {{ screenOrientation }}°</div>
@@ -152,7 +153,7 @@ const needsPermission = ref(false);
 const rawHeading = ref(0);
 const smoothedHeading = ref(0);
 const sensorType = ref('');
-const showDebug = ref(false); // 设为 true 可显示调试信息
+const showDebug = ref(true); // 设为 true 可显示调试信息
 
 // ========== 设备检测 ==========
 const userAgent = navigator.userAgent.toLowerCase();
@@ -349,13 +350,15 @@ const handleOrientation = (event) => {
   }
   
   if (heading !== null) {
-    // 不标准化heading，保持原始值以支持累积旋转
-    // 只在rawHeading中保留原始范围
+    // 标准化heading到0-360范围（处理设备特定转换后可能出现的边界值）
+    heading = heading % 360;
+    if (heading < 0) heading += 360;
+    
+    // 更新累积旋转 - 使用标准化后的heading
+    updateAccumulatedRotation(heading);
+    
     rawHeading.value = heading;
     smoothedHeading.value = smoothHeading(heading);
-    
-    // 更新累积旋转
-    updateAccumulatedRotation(smoothedHeading.value);
   }
 };
 

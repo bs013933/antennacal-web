@@ -11,29 +11,45 @@
 当手机顺时针旋转时，罗盘上的指针转到N（北）就停止了，即使手机继续顺时针转动，指针也停在N不动。
 
 **根本原因**：
-在 `handleOrientation` 函数中（第346-351行），代码对 `heading` 值进行了标准化处理，将其限制在0-360度范围内：
-```javascript
-heading = heading % 360;
-if (heading < 0) heading += 360;
-```
+1. 传感器返回的 `heading` 值永远在 0-360 度范围内
+2. `updateAccumulatedRotation` 函数通过计算delta来累积旋转
+3. 问题在于当从 359° 跨越到 0° 时：
+   - delta = 0 - 359 = -359
+   - 经过修正：delta = -359 + 360 = 1（正确✓）
+4. 但当从 0° 跨越到 359°（逆时针）时：
+   - delta = 359 - 0 = 359
+   - 经过修正：delta = 359 - 360 = -1（正确✓）
 
-这导致当设备累积旋转超过360度时，heading值会被重新归零，破坏了累积旋转的连续性。
+原始代码的问题是使用了经过 `smoothHeading` 函数平滑处理后的值来更新累积旋转。`smoothHeading` 函数使用三角函数平均角度，在360度边界附近可能产生不准确的值，导致delta计算错误。
 
 **解决方案**：
-移除了heading的标准化处理，保持原始值以支持累积旋转。这样 `accumulatedRotation` 可以累积超过360度的旋转值，指针可以连续旋转而不会在360度边界停止。
+1. **直接使用原始标准化的heading值**来更新累积旋转，避免平滑处理引入的误差
+2. 确保heading在传入 `updateAccumulatedRotation` 之前已被标准化到0-360范围
+3. `smoothedHeading` 仅用于显示目的，不参与累积旋转计算
 
-**修改代码**：
+**修改代码**（第351-361行）：
 ```javascript
 if (heading !== null) {
-  // 不标准化heading，保持原始值以支持累积旋转
-  // 只在rawHeading中保留原始范围
+  // 标准化heading到0-360范围（处理设备特定转换后可能出现的边界值）
+  heading = heading % 360;
+  if (heading < 0) heading += 360;
+  
+  // 更新累积旋转 - 使用标准化后的原始heading值
+  updateAccumulatedRotation(heading);
+  
   rawHeading.value = heading;
   smoothedHeading.value = smoothHeading(heading);
-  
-  // 更新累积旋转
-  updateAccumulatedRotation(smoothedHeading.value);
 }
 ```
+
+**调试支持**：
+启用了调试模式（`showDebug = true`），在界面上显示：
+- Raw Heading: 原始罗盘读数
+- Smoothed Heading: 平滑后的读数
+- **Accumulated Rotation: 累积旋转角度**（可以超过360度或小于0度）
+- 传感器类型、设备信息等
+
+这样用户可以实时查看累积旋转值，确认指针是否持续旋转。
 
 ---
 
