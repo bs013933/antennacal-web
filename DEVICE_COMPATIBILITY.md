@@ -49,13 +49,23 @@ if (event.webkitCompassHeading !== null) {
 }
 // Android - 绝对方向（推荐）
 else if (event.absolute && event.alpha !== null) {
-  heading = event.alpha; // 基于正北的绝对方向，无需调整
+  heading = event.alpha;
+  // 关键：Android设备需要反转！
+  // 原因：当设备顺时针旋转时，alpha值逆时针减小
+  // 必须反转才能得到正确的罗盘方向
+  heading = 360 - heading;
 }
 // Android - 相对方向（备用）
 else if (event.alpha !== null) {
-  heading = event.alpha; // 相对于设备启动时的方向
+  heading = event.alpha;
+  heading = 360 - heading; // 同样需要反转
 }
 ```
+
+**重要说明**：
+- ✅ **iOS设备**：`webkitCompassHeading`直接返回罗盘方向，无需处理
+- ⚠️ **Android设备**：`alpha`值定义与罗盘方向相反，**必须反转**（360 - alpha）
+- 这不是bug，而是Android DeviceOrientation API的设计特性
 
 ---
 
