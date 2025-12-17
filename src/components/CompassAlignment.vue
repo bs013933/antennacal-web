@@ -77,6 +77,18 @@
         <div v-if="showDebug" class="debug-info">
           <div class="debug-row">Raw: {{ Math.round(rawHeading) }}°</div>
           <div class="debug-row">Sensor: {{ sensorType }}</div>
+          <div class="debug-row">Device: {{ isAndroid ? 'Android' : 'iOS' }}{{ isXiaomi ? ' (Xiaomi)' : '' }}</div>
+        </div>
+        
+        <!-- 手动校准控件 -->
+        <div v-if="isActive" class="calibration-controls">
+          <div class="calibration-label">{{ t.calibration }}:</div>
+          <div class="calibration-buttons">
+            <button @click="adjustCalibration(-5)" class="calibration-btn">-5°</button>
+            <span class="calibration-value">{{ calibrationOffset }}°</span>
+            <button @click="adjustCalibration(5)" class="calibration-btn">+5°</button>
+            <button v-if="calibrationOffset !== 0" @click="resetCalibration" class="reset-btn">{{ t.reset }}</button>
+          </div>
         </div>
         
         <div v-if="isStableAligned" class="aligned-indicator">
@@ -122,7 +134,9 @@ const translations = {
     difference: '偏差',
     aligned: '已对准！',
     turnLeft: '向左转',
-    turnRight: '向右转'
+    turnRight: '向右转',
+    calibration: '校准偏移',
+    reset: '重置'
   },
   en: {
     title: 'Real-time Compass',
@@ -135,7 +149,9 @@ const translations = {
     difference: 'Offset',
     aligned: 'Aligned!',
     turnLeft: 'Turn Left',
-    turnRight: 'Turn Right'
+    turnRight: 'Turn Right',
+    calibration: 'Calibration',
+    reset: 'Reset'
   }
 };
 
@@ -149,6 +165,13 @@ const rawHeading = ref(0);
 const smoothedHeading = ref(0);
 const sensorType = ref('');
 const showDebug = ref(false); // 设为 true 可显示调试信息
+
+// 校准偏移量（度数）
+const calibrationOffset = ref(0);
+
+// 设备检测
+const isAndroid = /android/i.test(navigator.userAgent);
+const isXiaomi = /xiaomi|mi\s|redmi/i.test(navigator.userAgent);
 
 // 平滑处理 - 增加平滑窗口以减少抖动
 const headingHistory = ref([]);
@@ -238,25 +261,39 @@ let orientationHandler = null;
 
 const handleOrientation = (event) => {
   let heading = null;
+  let needsCalibration = false;
   
-  // iOS 设备
+  // iOS 设备 - webkitCompassHeading已经是正确的罗盘方向
   if (event.webkitCompassHeading !== undefined && event.webkitCompassHeading !== null) {
     heading = event.webkitCompassHeading;
     sensorType.value = 'iOS Compass';
   }
   // Android 绝对方向（优先）
   else if (event.absolute && event.alpha !== null) {
-    // alpha: 0-360，0度为正北，顺时针增加
     heading = event.alpha;
-    sensorType.value = 'Absolute (alpha: ' + Math.round(event.alpha) + ')';
+    needsCalibration = true;
+    sensorType.value = 'Android Absolute' + (isXiaomi ? ' (Xiaomi)' : '');
   }
   // Android 相对方向
   else if (event.alpha !== null) {
     heading = event.alpha;
-    sensorType.value = 'Relative (alpha: ' + Math.round(event.alpha) + ')';
+    needsCalibration = true;
+    sensorType.value = 'Android Relative' + (isXiaomi ? ' (Xiaomi)' : '');
   }
   
   if (heading !== null) {
+    // Android设备需要校准：
+    // DeviceOrientation的alpha在Android上定义为：
+    // 设备顶部指向的方向与正北之间的角度差
+    // 需要反向计算：360 - alpha，才能得到正确的罗盘方向
+    if (needsCalibration && isAndroid) {
+      // 对于Android设备（包括小米），反转alpha值
+      heading = 360 - heading;
+    }
+    
+    // 应用手动校准偏移量
+    heading = heading + calibrationOffset.value;
+    
     // 标准化到 0-360
     heading = heading % 360;
     if (heading < 0) heading += 360;
@@ -318,6 +355,18 @@ const stopCompass = () => {
   isActive.value = false;
   headingHistory.value = [];
   alignedHistory.value = [];
+};
+
+// 校准方法
+const adjustCalibration = (delta) => {
+  calibrationOffset.value += delta;
+  // 保持在 -180 到 180 范围内
+  while (calibrationOffset.value > 180) calibrationOffset.value -= 360;
+  while (calibrationOffset.value < -180) calibrationOffset.value += 360;
+};
+
+const resetCalibration = () => {
+  calibrationOffset.value = 0;
 };
 
 onMounted(() => {
@@ -661,5 +710,78 @@ onUnmounted(() => {
 .debug-row {
   padding: 2px 0;
   color: #666;
+}
+
+/* 校准控件 */
+.calibration-controls {
+  margin-top: 10px;
+  padding: 12px;
+  background: rgba(33, 150, 243, 0.1);
+  border-radius: 6px;
+  border: 1px solid rgba(33, 150, 243, 0.3);
+}
+
+.calibration-label {
+  font-size: 13px;
+  color: #1976d2;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.calibration-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.calibration-btn {
+  padding: 6px 12px;
+  background: #2196f3;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 14px;
+}
+
+.calibration-btn:hover {
+  background: #1976d2;
+  transform: scale(1.05);
+}
+
+.calibration-btn:active {
+  transform: scale(0.95);
+}
+
+.calibration-value {
+  min-width: 50px;
+  text-align: center;
+  font-weight: 700;
+  color: #1976d2;
+  font-size: 16px;
+}
+
+.reset-btn {
+  padding: 6px 12px;
+  background: #ff5722;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-size: 12px;
+}
+
+.reset-btn:hover {
+  background: #e64a19;
+  transform: scale(1.05);
+}
+
+.reset-btn:active {
+  transform: scale(0.95);
 }
 </style>
